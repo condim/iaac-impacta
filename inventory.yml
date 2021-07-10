@@ -17,6 +17,8 @@ local:
      10.0.0.10:
         datacenter: primario
 remoto:
+  vars:
+    path_da_instalacao: '/opt/slacko-api/'
   hosts:
     10.0.0.11:
        datacenter: secundario

@@ -1,0 +1,97 @@
+- hosts: remoto
+  tasks:
+  - name: Clone Repository
+    ansible.builtin.git:
+      repo: https://github.com/LeonardoDG2084/iaac_slacko-api
+      dest: "{{ path_da_instalacao }}"
+    register: git_slacko
+    tags:
+      - update
+
+  - name: Install docker, python and pip
+    apt:
+      pkg:
+      - docker.io
+      - python3
+      - python3-pip
+
+  - name: Install python docker sdk
+    pip:
+      name: docker
+
+  - name: Install project requirements
+    pip:
+      requirements: "{{ path_da_instalacao }}requeriments.txt"
+
+  - name: Create docker network for mongo and mongo-express
+    docker_network:
+      name: mongo
+
+  - name: Install mongo
+    docker_container:
+      name: mongodb
+      image: mongo
+      ports:
+       - "27017:27017"
+      state: started
+      restart_policy: always
+      networks:
+        - name: "mongo"
+      
+  - name: Install mongo-express
+    docker_container:
+      name: mongo-express
+      image: mongo-express:0.54.0
+      networks:
+        - name: "mongo"
+          links:
+            - mongodb:mongo
+      ports:
+       - "8081:8081"
+
+  - name: Systemd slacko.service file
+    copy:
+      dest: /lib/systemd/system/slacko.service
+      content: |
+        [Unit]
+        Description=Api Slacko
+        Documentation=https://github.com/LeonardoDG2084/iaac_slacko-api
+        After=network.target docker.service
+        
+        [Service]
+        ExecStart=uvicorn main:app --host 0.0.0.0 --reload --reload-dir {{ path_da_instalacao }}
+        ExecReload = /bin/kill -s HUP $MAINPID
+        ExecStop = /bin/kill -s TERM $MAINPID
+        Restart=on-failure
+        User=vagrant
+        WorkingDirectory={{ path_da_instalacao }}
+        Environment=~/.profile
+
+        [Install]
+        WantedBy=multi-user.target
+        Alias=slacko.service
+
+  - name: Enable, start systemd slacko.service 
+    ansible.builtin.systemd:
+      state: started
+      name: slacko.service
+
+  - name: Test page
+    uri:
+      url: http://localhost:8000/healthcheck
+    ignore_errors: true
+    register: page_error_level
+    failed_when: page_error_level.status != 200
+    tags:
+      - update
+
+  - name: Restart if Task "Test page" return error code
+    when: page_error_level.status != 200 or git_slacko.changed
+    ansible.builtin.systemd:
+      state: restarted
+      name: slacko.service
+      enabled: yes
+      daemon_reload: yes
+    tags:
+      - update
+
